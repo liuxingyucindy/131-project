@@ -1,0 +1,813 @@
+---
+title: 'Course project: stage 1'
+author: "PSTAT131-231"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F, 
+                      fig.align = 'center',
+                      fig.height = 4, 
+                      fig.width = 4)
+
+library(pander)
+library(tidyverse)
+library(ggmap)
+library(tidyr)
+#library(dplyr)
+library(modelr)
+library(maps)
+library(ggridges)
+library(dendextend)
+library(randomForest)
+library(gbm)
+library(ROCR)
+library(tree)
+library(maptree)
+library(ggpubr)
+library(MASS)
+```
+### Project overview and expectations
+
+Your final project will be to merge census data with 2016 voting data to analyze the election outcome. The work will be carried out in two stages:
+
+1. Preparation and planning (guided)
+  + Background reading
+  + Data preparation
+  + Exploratory analysis
+  + Tentative plan for statistical modeling
+  
+2. Data analysis and reporting (open-ended)
+  + Statistical modeling
+  + Interpretation of results
+  + Report findings
+  
+This document pertains to the first stage: you'll gather background, preprocess and explore the data, and come up with a tentative plan for the second stage. 
+
+Your objective is to work through the steps outlined in this document, which walk you through data preparation and exploration. The structure is similar to a homework assignment, and your deliverable will be a knitted PDF with all steps filled in.
+
+**Formatting guidelines**
+
+* Your knitted document should not include codes.
+* All R output should be nicely formatted; plots should be appropriately labeled and sized, and tables should be passed through `pander()`. Raw R output should not be included.
+* Avoid displaying extra plots and figures if they don't show information essential to addressing questions.
+
+**Suggestions for teamwork**
+
+* Set a communication plan -- how will you share your work and when/how will you meet?
+* Assign roles -- designate a group member to coordinate communication and another group member to coordinate preparation and submission of your deliverables.
+* Divide the work! Discuss your skills and interests and assign each group member specific tasks. Many of the tasks can be carried out in parallel. For those that can't, if some of your group members have more immediate availability, have them work on earlier parts, and have other members follow up on their work by completing later parts. 
+
+**Other comments**
+
+* The plan that you lay out at the end of this document is not a firm committment -- you can always shift directions as you get farther along in the project.
+* Negative results are okay. Sometimes an analysis doesn't pan out; predictions aren't good, or inference doesn't identify any significant associations or interesting patterns. Please don't feel that the tasks you propose in this first stage need to generate insights; their merit will be assessed not on their outcome but on whether they aim at thoughtful and interesting questions with a reasonable approach.
+
+**Evaluations**
+
+Our main objective at this stage is to position you well to move forward with an analysis of your choosing, and to provide feedback on your proposal. We may suggest course corrections if we spot anything that we anticipate may pose significant challenges downstream, or encourage you to focus in a particular direction when you start your analysis. Our goal is *not* to judge or criticize your ideas, but rather to help make your project a more rewarding experience. Most credit will be tied to simply completing the guided portions. Here are the basic criteria.
+
+* We'll look for the following in the guided portions (Part 0 -- Part 2):
+  + Has your group completed each step successfully?
+  + Does your document adhere to the formatting guidelines above?
+* We'll look for the following in your proposed tasks:
+  + Is the task relevant to understanding or predicting the election outcome?
+  + Is a clear plan identified for how to prepare the data for statistical modeling that is appropriate for the task?
+  + Is the modeling approach sensible given the task?
+
+# Part 0. Background
+
+The U.S. presidential election in 2012 did not come as a surprise. Some correctly predicted the outcome of the election correctly including [Nate Silver](https://en.wikipedia.org/wiki/Nate_Silver), and [many speculated about his approach](https://www.theguardian.com/science/grrlscientist/2012/nov/08/nate-sliver-predict-us-election).
+
+Despite the success in 2012, the 2016 presidential election came as a [big surprise](https://fivethirtyeight.com/features/the-polls-missed-trump-we-asked-pollsters-why/) to many, and it underscored that predicting voter behavior is complicated for many reasons despite the tremendous effort in collecting, analyzing, and understanding many available datasets.
+
+To familiarize yourself with the general problem of predicting election outcomes, read the articles linked above and answer the following questions. Limit your responses to one short paragraph (3-5 sentences) each.
+
+### Question 0 (a)
+What makes voter behavior prediction (and thus election forecasting) a hard problem?
+
+*According to the fivethrityeight.com, every poll has error and some come from statistical noise and some from factors that are hard to quantify, like nonresponse bias. So they need to reduce error by combing many different polls and accounting for their quality and lean. With such combination, it will create some errors in some states and in a wrong direction, leading to the wrong individual predictions in each state unevenly. Also, for nonreponse bias, women who voted for Trump might have been especially reluctant to tell pollsters. Moreover, there is a time delay during the poll collection.*
+
+### Question 0 (b)
+What was unique to Nate Silver's approach in 2012 that allowed him to achieve good predictions?
+
+*Nash splited his process into two parts. The first is to build a mathematical model of how people in the US states will vote if the election were held on particular day. So Nash studied their voting behavior. Then, in the second part, Nash contructs the model of the polls from national and state basis. There are still variation between polling results within each state due to a number of factors, like sampling errors. So Nash tried to correct and estimate the error within a margin. After building the model, Nash needed to know how other effects may affect the model, like the house effects or the effects of the economy on the polls. Also, he considers the response bias by comparing to the estimated support with the actual votes. So they use Bayes Theorem to correct the effect.*
+
+### Question 0 (c)
+What went wrong in 2016? What do you think should be done to make future predictions better?
+
+*There are many missing information here in the prediction of 2016. They didn't have the final margins in many states, whether they miss the polls due to systematic problems. Also, Trump pulled late support from many Republican others who had been decided or were supporting a third-party candidate. Different types of polling error occurred in 2016. For example, systematically underestimating the proportion of voters who are white in both local and national polling, non-response bias and not trusting pollsters. We suggest using recorded voice rather than live poll to reduce distrust. Also, take gender, race and other social factors into consideration. Pollsters can use multiple ways of polling to increase turnout.*
+
+\newpage
+# Part 1. Datasets
+
+The `project_data.RData` binary file contains three datasets: tract-level 2010 census data, stored as `census`; metadata `census_meta` with variable descriptions and types; and county-level vote tallies from the 2016 election, stored as `election_raw`.
+```{r}
+load('data/project_data.RData')
+```
+
+## Election data
+
+Some example rows of the election data are shown below:
+```{r}
+filter(election_raw, !is.na(county)) %>% 
+  head() %>% 
+  pander()
+```
+
+The meaning of each column in `election_raw` is self-evident except `fips`. The accronym is short for [Federal Information Processing Standard](https://en.wikipedia.org/wiki/FIPS_county_code). In this dataset, `fips` values denote the area (nationwide, statewide, or countywide) that each row of data represent.
+
+Nationwide and statewide tallies are included as rows in `election_raw` with `county` values of `NA`. There are two kinds of these summary rows:
+
+* Federal-level summary rows have a `fips` value of `US`.
+* State-level summary rows have the state name as the `fips` value.
+
+### Question 1 (a)
+Inspect rows with `fips == 2000`. Provide a reason for excluding them. 
+```{r, include = F}
+# scratch work here for inspection -- will not be included in report
+
+filter(election_raw, fips == 2000) %>% 
+  head() %>% 
+  pander()
+
+```
+
+*These votes are recorded on a different geographic level, which is on state level. When fips is numeric, that's a census tract (sub-county-level), however we don't know which county they are from. Since these are not county-level data, we should excluded them. From Alaska region there is no county, so it is hard for us to make the correct predictions based on each county.*
+
+### Question 1 (b)
+Drop these observations -- please write over `election_raw` -- and report the data dimensions after removal. 
+```{r}
+# filter out fips == 2000
+election_raw <- election_raw %>%
+  filter(fips != 2000)
+
+# print dimensions
+dim(election_raw) %>% pander()
+
+```
+### Answer
+The dimension after removal is 5 with 18345 data.
+
+## Census data
+
+The first few rows and columns of the `census` data are shown below.
+```{r}
+census %>% 
+  select(1:6) %>% 
+  head() %>% 
+  pander(digits = 15)
+```
+Variable descriptions are given in the `metadata` file. The variables shown above are:
+```{r}
+census_meta %>% head() %>% pander()
+```
+
+## Data preprocessing
+
+### Election data
+
+Currently, the election dataframe is a concatenation of observations (rows) on three kinds of observational units: the country (one observation per candidate); the states (fifty-ish observations per candidate); and counties (most observations in the data frame). These are distinguished by the data type of the `fips` value; for the country observations, `fips == US`; for the state observations, `fips` is a character string (the state name); and for the county observations, `fips` is numeric. In general, it's good practice to format data so that each data table contains observations on only one kind of observational unit.
+
+### Question 1 (c)
+Separate `election_raw` into separate federal-, state-, and county-level dataframes:
+
+* Store federal-level tallies as `election_federal`.
+    
+* Store state-level tallies as `election_state`.
+    
+* Store county-level tallies as `election`. Coerce the `fips` variable to numeric.
+
+```{r}
+# create one dataframe per observational unit
+
+election_federal <- election_raw %>%
+  filter(fips == c("US")) %>% as.data.frame()
+
+election_state <- election_raw %>%
+  filter(fips != c('US')) %>%
+  filter(is.na(county)) %>% as.data.frame()
+
+
+election <- election_raw %>%
+  filter(fips != c('US')) %>%
+  filter(!is.na(county)) %>%
+  mutate(fips = as.numeric(fips))  %>% as.data.frame()
+```
+
+#### (i) Print the first three rows of `election_federal`. 
+Format the table nicely using `pander()`.
+```{r}
+# print first few rows
+slice(election_federal, 1:3) %>% pander()
+```
+
+#### (ii) Print the first three rows of `election_state`.
+Format the table nicely using `pander()`.
+```{r}
+# print first few rows
+slice(election_state, 1:3) %>% pander()
+```
+
+#### (iii) Print the first three rows of `election`. 
+Format the table nicely using `pander()`.
+```{r}
+# print first few rows
+slice(election, 1:3) %>% pander()
+```
+
+
+### Census data
+
+The `census` data contains high resolution information (more fine-grained than county-level). In order to align this with the election data, you'll need to aggregate to the county level, which is the highest geographical resolution available in the election data. The following steps will walk you through this process.
+
+### Question 1 (d)
+This first set of initial steps aims to clean up the census data and remove variables that are highly correlated. Write a chain of commands to accomplish the following:
+
+  + filter out any rows of `census` with missing values;
+
+  + convert `Men`, `Women`, `Employed`, and `Citizen` to percentages of the total population;
+
+  + drop `Men`, since the percentage of men is redundant (percent men + percent women = 100)
+
+  + compute a `Minority` variable by summing `Hispanic`, `Black`, `Native`, `Asian`, `Pacific` and then remove these variables after creating `Minority`;
+
+  + remove `Income`, `Walk`, `PublicWork`, and `Construction`; and
+
+  + remove variables whose names end with `Err` (standard errors for estimated quantities).
+   
+Store the result as `census_clean`, and print the first 3 rows and 7 columns. Format the printed rows and columns nicely using `pander()`.
+
+```{r}
+# clean census data
+census_clean <- census %>%
+  na.omit() %>%
+  select(-CensusTract)%>%
+  mutate(Men = Men/TotalPop*100,
+         Women = Women/TotalPop*100,
+         Employed = Employed/TotalPop*100,
+         Citizen = Citizen/TotalPop*100) %>%
+  select( -Men) %>%
+  mutate(Minority = Hispanic + Black + Native + Asian + Pacific) %>%
+  select(-c("Hispanic", "Black", "Native", "Asian", "Pacific"))%>%
+  select(-c("Income", "Walk", "PublicWork", "Construction")) %>%
+  select(-ends_with("Err"))
+  
+# print first few rows/columns
+census_clean %>% 
+  slice(1:3) %>%
+  select(1:7) %>% 
+  pander()
+
+```
+ 
+### Question 1 (e) 
+To aggregate the clean census data to the county level, you'll weight the variables by population. Create population weights for sub-county census data by following these steps: 
+
+  + group `census_clean` by `State` and `County`;
+  
+  + use `add_tally()` to add a `CountyPop` variable with the population; 
+  
+  + add a population weight variable `pop_wt` computed as `TotalPop/CountyPop` (the proportion of the county population in each census tract);
+  
+  + multiply all quantitative variables by the population weights (use `mutate(across(..., ~ .x*pop_wt));
+  
+  + remove the grouping structure (`ungroup()`) and drop the population weights and population variables.
+
+Store the result as `census_clean_weighted`, and print the first 3 rows and 7 columns. Format the output nicely using `pander()`.
+```{r}
+# compute population-weighted quantitative variables
+census_clean_weighted <- census_clean %>%
+  group_by(State, County) %>%
+  add_tally(TotalPop, name = 'CountyPop') %>%
+  mutate(pop_wt = TotalPop/CountyPop) %>%
+  mutate(across(Women:Minority, ~.x*pop_wt)) %>%
+  ungroup() %>%
+  select(-pop_wt, -contains('pop'))
+
+# print first few rows/columns
+census_clean_weighted %>%
+  slice(1:3) %>%
+  select(1:7)%>%
+  pander()
+
+```
+
+
+### Question 1 (f)
+Here you'll aggregate the census data to county level. Follow these steps:
+
+  + group the sub-county data `census_clean_weighted` by state and county;
+  
+  + compute popluation-weighted averages of each variable by taking the sum of each quantitative variable (use `mutate(across(..., sum))`);
+  
+  + remove the grouping structure.
+    
+Store the result as `census_tidy` and print the first 3 rows and 7 columns. Format the output nicely using `pander()`.
+```{r}
+# aggregate to county level
+census_tidy <- census_clean_weighted %>%
+  group_by(State, County) %>% 
+  mutate(across(Women:Minority, sum)) %>%
+  ungroup() %>%
+  distinct()
+
+# print first few rows/columns
+census_tidy %>%
+  slice(1:3) %>%
+  select(1:7) %>%
+  pander()
+```
+
+You can check your final result by comparison with the reference dataset in the .Rmd file for this document containing the first 20 rows of the tidy data.
+```{r}
+load('data/census-tidy-ref.RData')
+```
+
+
+### Question 1 (g)
+Now that you have tidy versions of the census and election data, and a merged dataset, clear the raw and intermediate dataframes from your environment using `rm(list = setdiff(ls(), ...))`. `ls()` shows all objects in your environment, so the command removes the set difference between all objects and ones that you specify in place of `...`; the latter should be a vector of the object names you want to keep. You should keep the three data frames containing election data for the federal, state, and county levels, and the tidy census data.
+```{r}
+# clean up environment
+rm(list = setdiff(ls(), c('election_federal', 'election_state', 'election', 'census_tidy')))
+```
+
+\newpage
+# Part 2: Exploratory analysis
+### Question 2 (a)
+How many named presidential candidates were there in the 2016 election? Draw a bar graph of all votes received by each candidate, and order the candidate names by decreasing vote counts. (*Hints*: use the federal-level election data; you may need to log-transform the vote axis to see all the bar heights clearly.)
+```{r}
+# plotting codes here
+election_federal %>%
+  group_by(candidate) %>%
+  summarise_at('votes', sum ) %>%
+  arrange(desc(votes)) %>%
+  ggplot(aes(x = log(votes) , y = reorder(candidate, votes))) +
+  geom_bar(stat = "identity", fill = "steelblue", color = "blue") +
+  labs(x = 'Votes', y = 'candidate in descending order') +
+  ggtitle('Votes received by each candidate with log-transformation')
+
+# number of presidential candidates
+length(election_federal$candidate) -1
+
+```
+
+
+Next you'll generate maps of the election data using `ggmap`. The .Rmd file for this document contains codes to generate a map of the election winner by state. The codes retrieve state geographical boundaries and merge the geographic data with the statewide winner found from the election data by state.
+```{r, eval = F}
+# plotting boundaries for US states
+states <- map_data("state")
+name2abb <- function(statename){
+  ix <- match(statename, tolower(state.name))
+  out <- state.abb[ix]
+  return(out)
+}
+states <- states %>% 
+  mutate(fips = name2abb(region))
+
+# who won each state?
+state_winner <- election_state %>% # this line depends on your results above!
+  group_by(fips) %>% 
+  mutate(total = sum(votes), 
+         pct = votes/total) %>% 
+  slice_max(pct)
+
+# merge winner with plotting boundaries and make map
+left_join(states, state_winner) %>%
+  ggplot() + 
+  geom_polygon(aes(x = long, 
+                   y = lat, 
+                   fill = candidate, 
+                   group = group), 
+               color = "white", 
+               size=0.3) +
+  coord_fixed(1.3) +
+  guides(fill=FALSE) +
+  scale_fill_brewer(palette="Set1") +
+  theme_nothing()
+```
+*Beside the 'None of these candidates', we have 31 candidates with name shown in the plot. *
+
+### Question 2 (b) 
+Follow the example above to create a map of the election winner by county. The .Rmd file for this document contains codes to get you started.
+```{r}
+# plotting boundaries for US counties
+counties <- map_data("county")
+fips <- maps::county.fips %>%
+  separate(polyname, c('region', 'subregion'), sep = ',')
+counties <- counties %>% left_join(fips)
+
+# who won each county?
+county_winner <- election %>% 
+  group_by(fips) %>% 
+  mutate(total = sum(votes), 
+         pct = votes/total) %>% 
+  slice_max(pct)
+
+# merge winner with plotting boundaries and make map
+left_join(counties, county_winner) %>%
+  ggplot() + 
+  geom_polygon(aes(x = long, 
+                   y = lat, 
+                   fill = candidate, 
+                   group = group), 
+               color = "white", 
+               size=0.3) +
+  coord_fixed(1.3) +
+  guides(fill=FALSE) +
+  scale_fill_brewer(palette="Set1") +
+  theme_nothing()
+
+```
+### Question 2 (c)
+Which variables drive variation among counties? Carry out PCA for the census data. 
+
+#### (i) Center and scale the data, compute and plot the principal component loadings for the first two PC's.
+```{r}
+# center and scale
+county_ctr <- scale(census_tidy[3:24], scale = T)
+
+# singular value decomposition
+county_svd <- svd(county_ctr)
+v_2 <- county_svd$v[,1:2]
+pander(v_2)
+
+v_2 %>%
+  as.data.frame() %>%
+  rename(PC1 = V1, PC2 = V2) %>%
+  mutate(variable = colnames(county_ctr)) %>%
+  gather(key = 'PC', value = 'Loading', 1:2) %>%
+  arrange(variable) %>%
+  ggplot(aes(x = variable, y = Loading)) +
+  geom_point(aes(shape = PC)) +
+  theme_bw() +
+  geom_path(aes(linetype = PC, group = PC)) +
+  theme(axis.text.x = element_text(angle = 90)) +
+  labs(title = "Loadings for the first two PC's") +
+  theme(plot.title = element_text(hjust = 0.5)) 
+
+```
+
+#### (ii) Interpret the loading plot. Which variables drive the variation in the data?
+
+*For high PC1, it's driven by high Employed, IncomePerCap, White, WorkAtHome, Professional, SelfEmployed, and low Poverty, Minority, Child Poverty, Unemployment. 
+For high PC2, it mainly represent by high Private work, Drive, Production, Office, White, Women, and low SelfEmployed, WorkAtHome, familyWork. *
+
+#### (iii) How much total variation is captured by the first two principal components?
+```{r}
+# scratch work here -- don't show codes or output
+pc_vars <- county_svd$d^2/(nrow(county_ctr) - 1)
+
+tibble(PC = 1:min(dim(county_ctr)),
+       Proportion = pc_vars/sum(pc_vars),
+       Cumulative = cumsum(Proportion)) %>%
+  gather(key = 'measure', value = 'Variance Explained', 2:3) %>%
+  ggplot(aes(x = PC, y = `Variance Explained`)) +
+  geom_point() +
+  geom_path() +
+  geom_hline(yintercept = 0.75, color = 'red') +
+  facet_wrap(~ measure) +
+  theme_bw() +
+  scale_x_continuous(breaks = 1:30, labels = as.character(1:30))
+
+proportion_explained <- county_svd$d^2 / sum(county_svd$d^2) * 100
+head(proportion_explained, 2)
+
+```
+
+
+*The total variance is captured by the first two PCs is about 41.44%. Since the proportion of variance explained by PC1 and PC2 are 26.28% and 15.15% respectively. *
+
+#### (iv) Plot PC1 against PC2. 
+```{r}
+# plotting codes here
+county_ctr <- scale(census_tidy[3:24], scale = T)
+
+# singular value decomposition
+county_svd <- svd(county_ctr)
+v_2 <- county_svd$v[,1:2]
+
+Z <- county_ctr %*% v_2
+colnames(v_2) <- colnames(Z) <- paste('PC', 1:2, sep = '')
+
+# scatterplot
+p1 <- as.data.frame(Z) %>%
+  bind_cols(select(census_tidy, State, County)) %>%
+  ggplot(aes(x = PC1, y = PC2)) +
+  geom_point(aes(color = State)) +
+  theme_bw() +
+  guides(color = guide_none())+
+  ggtitle('Plot PC1 against PC2') +
+  labs(x = 'PC1', y = 'PC2') 
+
+p1
+```
+
+#### (v) Do you notice any outlier counties? If so, which counties, and why do you think they are outliers?
+```{r}
+# scratch work here
+#install.package('gridExtra')
+library(gridExtra)
+# center data matrix
+X_std <-  scale(census_tidy[3:24], scale = T)
+
+# singular value decomposition
+svd_X_std <- svd(X_std)
+
+# compute first two principal components from SVD
+d_2_std <- svd_X_std$d[1:2]
+v_2_std <- svd_X_std$v[, 1:2]
+Z_std <- X_std %*% v_2_std
+colnames(v_2_std) <- colnames(Z_std) <- paste('PC', 1:2, sep = '')
+
+
+plot_df <- bind_cols(county_name = census_tidy$County, 
+                     as.data.frame(Z_std))
+
+p1_scaled <- ggplot(plot_df, aes(x = PC1, y = PC2)) +
+  geom_point(alpha = 0.2) +
+  geom_text(aes(label = county_name), 
+            check_overlap = F, 
+            size = 2) +
+  theme_bw()
+
+# scatterplot
+p1 <- as.data.frame(Z) %>%
+  bind_cols(select(census_tidy, State, County)) %>%
+  ggplot(aes(x = PC1, y = PC2)) +
+  geom_point(aes(color = State)) +
+  theme_bw() +
+  guides(color = guide_none())+
+  ggtitle('PC1 against PC2') +
+  labs(x = 'PC1', y = 'PC2') 
+
+grid.arrange(p1_scaled, p1, nrow = 1)
+
+```
+
+*There is an outlier as we can see it from the plot of PC1 against PC2 by adding a horizontal and a vertical line to separate the scatter plot. And the 5th is the outlier since it is the smallest, which is Kusilvak Census Area in Alaska. *
+
+### Question 2 (d)
+Create a visualization of your choice using `census` data. Many exit polls noted that [demographics played a big role in the election](https://fivethirtyeight.com/features/demographics-not-hacking-explain-the-election-results/). If you need a starting point, use [this Washington Post article](https://www.washingtonpost.com/graphics/politics/2016-election/exit-polls/) and [this R graph gallery](https://www.r-graph-gallery.com/) for ideas and inspiration.
+
+```{r}
+# data
+state_data <- census_tidy %>% 
+  group_by(State) %>% 
+  summarise(citizen = sum(Citizen), 
+            poverty = mean(Poverty), 
+            unemployment = mean(Unemployment))
+state_data
+# plot
+state_data %>%
+  arrange(desc(citizen)) %>%
+  ggplot(aes(x= poverty, y = unemployment, size = citizen)) +
+  geom_point(alpha = 0.5) +
+  scale_size(range = c(0.5, 10), name = "Population (M)") +
+  labs(x = 'Poverty', y = 'Unemployment') +
+  ggtitle('Relationship between Poverty and Unemployment in Each State')
+
+
+```
+### Answer
+*This plot is arranged in descending order of citizen in relationship between unemployment and poverty in each state. *
+
+
+\newpage
+# Part 3: Planned work
+Now that you've thought about the prediction problem, tidied and explored the census and election data, you should devise a plan for more focused analysis.
+
+Your objective in the second stage of the project is to analyze a merged county-level dataset. The chunk below this paragraph in the .Rmd file for this document combines the vote information for the winning candidate and runner-up in each county with the census data. 
+```{r, eval = F}
+# define function to coerce state abbreviations to names
+abb2name <- function(stateabb){
+  ix <- match(stateabb, state.abb)
+  out <- tolower(state.name[ix])
+  return(out)
+}
+
+# top two candidates by county
+toptwo <- election %>% 
+  group_by(fips) %>% 
+  mutate(total = sum(votes), 
+         pct = votes/total) %>% 
+  slice_max(pct, n = 2)
+
+# create temporary dataframes with matching state/county information
+tmpelection <- toptwo %>%
+  ungroup %>%
+  # coerce names to abbreviations
+  mutate(state = abb2name(state)) %>%
+  # everything lower case
+  mutate(across(c(state, county), tolower)) %>%
+  # remove county suffixes
+  mutate(county = gsub(" county| columbia| city| parish", 
+                       "", 
+                       county)) 
+
+tmpcensus <- census_tidy %>% 
+  # coerce state and county to lowercase
+  mutate(across(c(State, County), tolower))
+
+# merge
+merged_data <- tmpelection %>%
+  left_join(tmpcensus, 
+            by = c("state"="State", "county"="County")) %>% 
+  na.omit()
+
+# clear temporary dataframes from environment
+rm(list = c('tmpwinner', 'tmpcensus'))
+
+# print first few rows
+merged_data[1:4, 1:8] %>% pander()
+```
+
+There are a number of possibilities for analyzing this data. Here are just a few:
+
+* Prediction
+  + Predict the winner of the popular vote
+  + Predict the winner of the general election
+  + Predict the winner of each county
+  + Predict the vote margin by county
+  + Predict the vote margin by state
+
+* Inference
+  + Model the probability one candidate wins a county and identify significant associations with census variables
+  + Model the vote margin and identify/interpret significant associations with census variables
+  + Cluster or group counties and model the probability of a win by one candidate or the vote margin separately for each cluster; look for different patterns of association
+  + Model the relationship between votes (or win probabilities) separately for each candidate, and contrast the results.
+
+Each would require some slightly different preprocessing of `merged_data` to select the relevant rows and columns for the specified tasks.
+
+### Question 3
+Propose an analysis that you'd like to carry out. Be specific: indicate two tasks you'll pursue and for each task indicate the methods you'll use to approach the task. Your methods description should include mention of how you will prepare `merged_data` for modeling, and which model(s) you'll try.
+
+These descriptions don't need to be long, just enough to convey the general idea. Also, these are not final commitments -- you can always change your mind later on if you like.
+
+#### Task 1
+
+**Task**:**Predict the winner of each county**
+
+**Methods**: **Before predicting variables, we would first plot exploratory figures to see how variables in merged_data are distributed and correlated. Then we splitting the merged_data into 80% Training and 20% Testing group on the column ??winner??. For the first prediction, we use all predictors in the merged_data and apply a logistic regression model to predict the winner. Then we use the error table and draw a ROC curve to see which variables are significant and which are not. Also, we need to find the optiaml threshold for the curve. We should remove the irrelevant ones before the second predicting phase. We also should try to compare the result with other model such as bagging and decision tree. With all two possible matrices compute, we can compare their confusion matrix to see which is a better way to predict.**
+
+
+#### Task 2
+
+**Task**:**Predict the winner of the general election**
+
+**Methods**:**We will add one more column in the merged_data dataset as weight over population. Since each county and each state all have different population size, it would affect the overall voting result prediction. Adding the weight would help reduce the prediction error. After we have the prediction for the winner of each county, we can combine all the predicted winner from each county, and see which candidate exceed half of the vote. In the end, we need to interpret the model we have to see if it is interpretable or make sense to us.**
+
+
+
+In order to train classification models, we need to combine the `election` and `census_tidy` data. This seemingly straightforward task is harder than it sounds. Codes are provided in the .Rmd file that make the necessary changes to merge them into `merged_election` for classification. After merging the data, partition the result into 80% training and 20% testing partitions.
+```{r}
+merged_election <- merged_data %>% 
+  filter(candidate == "Donald Trump" |candidate == "Hillary Clinton")
+
+election_part <- resample_partition(merged_election, 
+                                    c(test=0.8, train=0.2))
+train <- as_tibble(election_part$train)
+test <- as_tibble(election_part$test)
+```
+
+Train a logistic regression model on the training partition to predict the winning candidate in each
+county and estimate errors on the test partition. What are the significant variables? Also look at what are the significant variables in this case
+```{r}
+fit_glm <- glm(as.factor(candidate) ~ ., family = "binomial", data = train)
+#summary(fit_glm)
+```
+
+```{r}
+p_hat_glm <- predict(fit_glm, train, type = "response")
+y_hat_glm <- factor(p_hat_glm>0.5, labels=c('No','Yes'))
+
+election_predict <- prediction(predictions = p_hat_glm, labels = train$candidate)
+
+# compute error rates as a function of the probability threshold
+perf_log <- performance(prediction.obj = election_predict, 'tpr', 'fpr')
+
+# extract rates and threshold from perf_lda as a tibble
+rates_log <- tibble(fpr = perf_log@x.values,
+                    tpr = perf_log@y.values,
+                    thresh = perf_log@alpha.values) %>%
+  unnest(everything())
+
+# compute youden's stat
+rates_log <- rates_log %>% mutate(youden = tpr - fpr)
+
+# find the optimal value
+optimal_thresh <- rates_log %>% slice_max(youden)
+optimal_thresh %>% pander()
+
+errors <- table(train$candidate, y_hat_glm)
+(errors / rowSums(errors)) %>% pander()
+```
+
+
+Decision tree: train a decision tree on the training partition, and apply cost-complexity pruning. Visualize the tree before and after pruning. Estimate the misclassification errors on the test partition, 
+```{r, fig.height=6, fig.width=15}
+nmin <- 5
+tree_opts <- tree.control(nobs = nrow(train), 
+                          minsize = nmin,
+                          mindev = exp(-8))
+
+t_0 <- tree(as.factor(candidate) ~ ., data=train, 
+          control = tree_opts, split='deviance')
+
+draw.tree(t_0, cex = 0.6, digits = 2)
+summary(t_0)
+```
+
+```{r}
+#cost-complexity pruning
+nfolds <- 10
+cv_out <- cv.tree(t_0, K = nfolds, method = 'deviance')
+cv_df <- tibble(alpha = cv_out$k,impurity = cv_out$dev, size = cv_out$size)
+
+best_alpha <- slice_min(cv_df, impurity) %>% slice_min(size)
+
+t_opt <- prune.tree(t_0, k = best_alpha$alpha)
+draw.tree(t_opt, cex=0.7, digits=1)
+summary(t_opt)
+```
+
+
+```{r}
+# misclassification error
+t_opt_pred <- as_tibble(predict(t_opt, newdata = test))
+prediction_opt <- prediction(predictions = t_opt_pred[,2], labels = test$candidate)
+pred_q18 <- factor(t_opt_pred[,2] > 0.5, labels=c('No', 'Yes'))
+error <- table(class = test$candidate, pred = pred_q18)
+(error / rowSums(error))%>% pander()
+```
+*Without pruning, there are a total of 56 leaf nodes in our tree, 17 variables that are actually used in the tree, and misclassification error rate of 0.01634. After pruning, there are a total of 9 terminal nodes in the tree, 4 variables actually used in tree construction, and misclassification error rate of 0.09069. After pruning, the misclassification error rate increased. *
+
+*According to the plots, Transit is the first variable that both trees split on. This suggests that the percentage of people who use Transit has a correlation with voting behavior of the county. The tree shows that counties with higher percentage of population using transit are likely to have a lower income and vote for Hillary Clinton. Among the remaining counties with lower percentage of Transit users, counties with a larger White population are more likely to vote for Donald Trump. Also, variables like "White" and "pct" also seem important.*
+
+
+Compute ROC curves for the decision tree and logistic regression using predictions on the test data
+```{r, warning=F}
+#ROC curve for decision tree 
+perf <- performance(prediction_opt, 'tpr', 'fpr')
+sim_rates <- tibble(fpr = perf@x.values,
+                    tpr = perf@y.values,
+                    thresh = perf@alpha.values) %>%
+  unnest(everything()) %>%
+  mutate(youden = tpr-fpr)
+
+optimal_thresh <- sim_rates %>%
+  slice_max(youden)
+
+#ROC curve for logit regression
+test_glm <- glm(as.factor(candidate) ~ ., family = "binomial", data = test)
+p_test_glm <- predict(test_glm, test, type = "response")
+
+# create prediction object
+election_predictTest <- prediction(predictions = p_test_glm, labels = test$candidate)
+
+# compute error rates as a function of the probability threshold
+perf_log <- performance(prediction.obj = election_predictTest, 'tpr', 'fpr')
+
+# extract rates and threshold from perf_lda as a tibble
+rates_log <- tibble(fpr = perf_log@x.values,
+                    tpr = perf_log@y.values,
+                    thresh = perf_log@alpha.values) %>%
+  unnest(everything())
+
+```
+
+```{r}
+# compute youden's stat
+rates_log <- rates_log %>%
+  mutate(youden = tpr - fpr)
+optimal_thresh1 <- rates_log %>%
+  slice_max(youden)
+
+
+#Decision Tree ROC 
+roc_tree <- sim_rates %>% ggplot(aes(x=fpr, y=tpr)) +
+  geom_line() +
+  geom_point() +
+  geom_point(aes(x=optimal_thresh$fpr,
+                 y=optimal_thresh$tpr), color='red') +
+  theme_bw() +
+  ggtitle('ROC curve of Decision tree')+
+  theme(plot.title = element_text(hjust = 0.5))
+
+#logistic regression ROC
+roc_reg <- rates_log %>%
+  ggplot(aes(x = fpr, y = tpr)) +
+  geom_path() +
+  geom_point(aes(x=optimal_thresh1$fpr,
+                 y=optimal_thresh1$tpr), color='red') +
+  theme_bw() +
+  ggtitle('ROC curve of Logistic Regression')+
+  theme(plot.title = element_text(hjust = 0.5))
+
+
+#plotted ROC curves 
+ggarrange(roc_reg, roc_tree, ncol=2, nrow=1)
+```
+
